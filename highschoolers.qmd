@@ -1,0 +1,181 @@
+---
+title: "Postoje žáků gymnázií ke studiu na vysoké škole"
+subtitle: "`r params$selected_school`"
+author: "Katedra sociologie FF UK"
+format: docx
+reference-doc: "resources/custom-reference-doc.docx"
+params:
+ selected_school: "Gymnázium Brno, Křenová"
+editor: visual
+echo: false
+message: false
+warning: false
+dpi: 300
+fig-width: 10
+fig-height: 6
+---
+
+```{r setup}
+# Packages (has to always be loaded inside .qmd file!)
+library(tidyverse)
+library(scales)
+library(reschola)
+
+# Data (also have to be imported, even if already load in interactive session!)
+highschoolers <- read_rds("data-raw/highschoolers.rds")
+
+# Export variable names and labels into dataframe for quick access
+var_labs <- tibble(item = names(highschoolers),
+                   label = map_chr(highschoolers, ~attr(.x, "label")))
+
+# Define new variable identifying selected school
+highschoolers$selected <- if_else(highschoolers$Q12 == params$selected_school,
+                                  true = "Vaše škola",
+                                  false = "Ostatní školy")
+
+highschoolers$submitdate <- as_date(highschoolers$submitdate)
+highschoolers <- droplevels(highschoolers)
+```
+
+```{r custom-functions}
+# functions for stuff that gets repeated a lot. Ideally *shouldn't be defined inside .qmd file but in a seperate script (or package)
+
+props <- function(item, cats, group = "Vaše škola") {
+  selected <- sum(item[highschoolers$selected == group] %in% cats) / length(item[!is.na(item) & highschoolers$selected == group])
+  others <- sum(item[highschoolers$selected != group] %in% cats) / length(item[!is.na(item) & highschoolers$selected != group])
+  
+  list(selected = percent(selected, accuracy = 1, suffix = " %"),
+       others = percent(others, accuracy = 1, suffix = " %"))
+}
+
+listify <- function(my_vector) {
+  if(length(my_vector) > 1) {
+    paste(paste(my_vector[1:length(my_vector)-1], 
+                collapse = ", "), 
+          "a", 
+          my_vector[length(my_vector)])
+  } else {
+    # if length == 1, we don't want to print "and blah"
+    paste(my_vector)
+  }
+}
+```
+
+```{r globals}
+# Define all "global values" like ggplot2 theme, font size, palettes, etc. at the beginning, so they're in one place.
+
+likert_palette <- c("#55B7A9", "#F5D59F", "#DA6077")
+default_color <- "#55B7A9"
+missing_color <- "grey70"
+
+plot_font <- "Calibri"
+plot_font_size <- 21
+
+## ggplot2 theme (plot backround, text size, etc.)
+theme_set(theme_minimal() +
+            theme(panel.grid.minor = element_blank(),
+                  text = element_text(family = plot_font,
+                                      size = plot_font_size),
+                  plot.title = element_text(hjust = 0,
+                                            size = rel(1),
+                                            face = "bold"),
+                  plot.title.position = "plot",
+                  legend.position = "bottom",
+                  axis.title = element_blank(),
+                  legend.title = element_blank()))
+
+## ggplot2 defaults (color of bars, lines, etc)
+update_geom_defaults("col", list(fill = default_color))
+update_geom_defaults("point", list(color = default_color))
+update_geom_defaults("line", list(color = default_color))
+update_geom_defaults("text", list(family = plot_font))
+```
+
+```{r survey-info}
+n_schools <- number(length(levels(highschoolers$Q12)))
+n_pupils <- number(nrow(highschoolers)) # total number of students
+n_pupils_selected <- number(nrow(filter(highschoolers, selected == "Vaše škola"))) # number of students from selected school
+n_pupils_others <- number(nrow(highschoolers) - nrow(filter(highschoolers, selected == "Vaše škola"))) # number of students from other school
+
+survey_start <- as_czech_date(min(highschoolers$submitdate, na.rm = TRUE)) # first submited questionnaire date
+survey_end <- as_czech_date(max(highschoolers$submitdate, na.rm = TRUE)) # last submited questionnaire date
+```
+
+```{r teaching-satisfaction}
+satisfied_math <- props(highschoolers$Q15_SQ002, c("+3 velmi dobrá", "+2", "+1"))
+satisfied_physics <- props(highschoolers$Q15_SQ001, c("+3 velmi dobrá", "+2", "+1"))
+satisfied_info <- props(highschoolers$Q15_SQ003, c("+3 velmi dobrá", "+2", "+1"))
+```
+
+Tato zpráva přináší výsledky dotazníkového šetření studentů středních škol, zaměřeného na motivaci ke studiu přírodovědních a technických oborů. Šetření probíhalo od `r survey_start` do `r survey_end` a zúčastnilo se ho `r n_pupils` žáků ze `r n_schools` škol - `r n_pupils_selected` ze vaší školy a `r n_pupils_others` ze škol ostatních.
+
+S výukou matematiky bylo v době sběru dat spokojeno `r satisfied_math$selected` vašich žáků (na ostatních školách to bylo `r satisfied_math$others` žáků), s výukou fyziky `r satisfied_physics$selected` žáků (ostatní školy `r satisfied_physics$others` žáků) a nakonec s výukou informatiky bylo spokojeno `r satisfied_info$selected` žáků (ve srovnání s `r satisfied_info$others` na ostatních školách).
+
+```{r teaching-satisfaction-plot}
+
+teaching_satisfaction <- highschoolers |> 
+  select(starts_with("Q15"), selected) |> 
+  pivot_longer(cols = -selected,
+               names_to = "item",
+               values_to = "response") |> 
+  filter(!is.na(response)) |> 
+  mutate(response = fct_collapse(response,
+                                  "Dobrá" = c("+3 velmi dobrá", "+2", "+1"),
+                                  "Něco mezi" = "4",
+                                  "Špatná" = c("-3 velmi špatná", "-2", "-1"))) |> 
+  count(selected, item, response) |> 
+  left_join(var_labs, by = "item") |> 
+  mutate(freq = n / sum(n),
+         freq_label = percent(freq, accuracy = 1, suffix = ""),
+         freq_label = if_else(freq < 0.05,
+                              true = "",
+                              false = freq_label),
+         .by = c(selected, item)) |> 
+  mutate(label = fct_relevel(label,
+                             "Matematika",
+                             "Fyzika",
+                             "Informatika"),
+         response = fct_relevel(response, "Nevím"))
+
+teaching_satisfaction |> 
+  ggplot(aes(x = freq,
+             y = selected,
+             fill = response,
+             label = freq_label)) +
+  facet_wrap(~label, ncol = 1) +
+  geom_col() +
+  geom_text(position = position_stack(vjust = 0.5),
+            size = rel(5.5),
+            color = if_else(teaching_satisfaction$response == "Něco mezi",
+                            true = "black",
+                            false = "white")) +
+  scale_fill_manual(values = c(missing_color, rev(likert_palette))) +
+  scale_x_continuous(labels = percent_format(accuracy = 1)) +
+  labs(title = "Jak hodnotíte výuku následujících předmětů na vašem gymnáziu?") +
+  guides(fill = guide_legend(reverse = TRUE)) +
+  theme(panel.grid.major.y = element_blank())
+```
+
+## Očekávání od vysokoškolského studia
+
+```{r top-expectations}
+top_expectations <- highschoolers |> 
+  select(starts_with("Q34") & !contains("other")) |> 
+  pivot_longer(cols = everything(),
+               names_to = "item",
+               values_to = "response") |> 
+  left_join(var_labs, by = "item") |> 
+  count(label, response) |> 
+  filter(!is.na(response)) |> 
+  mutate(freq = n / sum(n),
+         freq_label = percent(freq, accuracy = 1, suffix = ' %'),
+         label = str_to_lower(label),
+         label_freq = paste0(label, " (", freq_label, ")"),
+         .by = label) |> 
+  filter(response == "Ano") |> 
+  slice_max(freq, n = 5) |> 
+  filter(freq > 0) |> 
+  pull(label_freq)
+```
+
+Žáci gymnázií nejčastěji očekávají, že studium na vysoké škole jim přinese `r listify(top_expectations)`.
