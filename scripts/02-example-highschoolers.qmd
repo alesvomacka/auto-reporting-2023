@@ -3,16 +3,16 @@ title: "Postoje žáků gymnázií ke studiu na vysoké škole"
 subtitle: "`r params$selected_school`"
 author: "Katedra sociologie FF UK"
 format: docx
-reference-doc: "resources/custom-reference-doc.docx"
+reference-doc: "../resources/custom-reference-doc.docx"
 params:
- selected_school: "Gymnázium Brno, Křenová"
+ selected_school: "Gymnázium Joachima Barranda, Talichova 824, Beroun"
 editor: visual
 echo: false
 message: false
 warning: false
 dpi: 300
 fig-width: 10
-fig-height: 6
+fig-height: 5
 ---
 
 ```{r setup}
@@ -22,7 +22,7 @@ library(scales)
 library(reschola)
 
 # Data (also have to be imported, even if already load in interactive session!)
-highschoolers <- read_rds("data-raw/highschoolers.rds")
+highschoolers <- read_rds("../data-raw/highschoolers.rds")
 
 # Export variable names and labels into dataframe for quick access
 var_labs <- tibble(item = names(highschoolers),
@@ -33,12 +33,13 @@ highschoolers$selected <- if_else(highschoolers$Q12 == params$selected_school,
                                   true = "Vaše škola",
                                   false = "Ostatní školy")
 
+# Light cleaning (ideally done in separate script)
 highschoolers$submitdate <- as_date(highschoolers$submitdate)
 highschoolers <- droplevels(highschoolers)
 ```
 
 ```{r custom-functions}
-# functions for stuff that gets repeated a lot. Ideally *shouldn't be defined inside .qmd file but in a seperate script (or package)
+# functions for stuff that gets repeated a lot. Ideally *shouldn't* be defined inside .qmd file - make seperate script and source() it (or package)
 
 props <- function(item, cats, group = "Vaše škola") {
   selected <- sum(item[highschoolers$selected == group] %in% cats) / length(item[!is.na(item) & highschoolers$selected == group])
@@ -48,6 +49,7 @@ props <- function(item, cats, group = "Vaše škola") {
        others = percent(others, accuracy = 1, suffix = " %"))
 }
 
+#https://www.cararthompson.com/posts/2022-09-09-automating-sentences-with-r/
 listify <- function(my_vector) {
   if(length(my_vector) > 1) {
     paste(paste(my_vector[1:length(my_vector)-1], 
@@ -67,6 +69,7 @@ listify <- function(my_vector) {
 likert_palette <- c("#55B7A9", "#F5D59F", "#DA6077")
 default_color <- "#55B7A9"
 missing_color <- "grey70"
+text_color <- "black"
 
 plot_font <- "Calibri"
 plot_font_size <- 21
@@ -92,6 +95,8 @@ update_geom_defaults("text", list(family = plot_font))
 ```
 
 ```{r survey-info}
+# Basic info like number of respondents, survey timing, etc.
+
 n_schools <- number(length(levels(highschoolers$Q12)))
 n_pupils <- number(nrow(highschoolers)) # total number of students
 n_pupils_selected <- number(nrow(filter(highschoolers, selected == "Vaše škola"))) # number of students from selected school
@@ -102,6 +107,7 @@ survey_end <- as_czech_date(max(highschoolers$submitdate, na.rm = TRUE)) # last 
 ```
 
 ```{r teaching-satisfaction}
+#Using custom function to quickly 
 satisfied_math <- props(highschoolers$Q15_SQ002, c("+3 velmi dobrá", "+2", "+1"))
 satisfied_physics <- props(highschoolers$Q15_SQ001, c("+3 velmi dobrá", "+2", "+1"))
 satisfied_info <- props(highschoolers$Q15_SQ003, c("+3 velmi dobrá", "+2", "+1"))
@@ -112,7 +118,7 @@ Tato zpráva přináší výsledky dotazníkového šetření studentů středn�
 S výukou matematiky bylo v době sběru dat spokojeno `r satisfied_math$selected` vašich žáků (na ostatních školách to bylo `r satisfied_math$others` žáků), s výukou fyziky `r satisfied_physics$selected` žáků (ostatní školy `r satisfied_physics$others` žáků) a nakonec s výukou informatiky bylo spokojeno `r satisfied_info$selected` žáků (ve srovnání s `r satisfied_info$others` na ostatních školách).
 
 ```{r teaching-satisfaction-plot}
-
+# Plot for the paragraph above. Plots tend to be tedious to code, so ideal for custom functions (here we do it by hand)
 teaching_satisfaction <- highschoolers |> 
   select(starts_with("Q15"), selected) |> 
   pivot_longer(cols = -selected,
@@ -146,9 +152,7 @@ teaching_satisfaction |>
   geom_col() +
   geom_text(position = position_stack(vjust = 0.5),
             size = rel(5.5),
-            color = if_else(teaching_satisfaction$response == "Něco mezi",
-                            true = "black",
-                            false = "white")) +
+            color = text_color) +
   scale_fill_manual(values = c(missing_color, rev(likert_palette))) +
   scale_x_continuous(labels = percent_format(accuracy = 1)) +
   labs(title = "Jak hodnotíte výuku následujících předmětů na vašem gymnáziu?") +
@@ -159,7 +163,9 @@ teaching_satisfaction |>
 ## Očekávání od vysokoškolského studia
 
 ```{r top-expectations}
+# Let's extract 5 top expectations for university
 top_expectations <- highschoolers |> 
+  filter(selected == "Vaše škola") |> 
   select(starts_with("Q34") & !contains("other")) |> 
   pivot_longer(cols = everything(),
                names_to = "item",
@@ -178,4 +184,4 @@ top_expectations <- highschoolers |>
   pull(label_freq)
 ```
 
-Žáci gymnázií nejčastěji očekávají, že studium na vysoké škole jim přinese `r listify(top_expectations)`.
+Žáci vašeho gymnázia nejčastěji očekávají, že studium na vysoké škole jim přinese `r listify(top_expectations)`.
